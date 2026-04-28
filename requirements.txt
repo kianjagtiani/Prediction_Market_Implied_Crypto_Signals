@@ -1,0 +1,18 @@
+pandas>=2.0
+numpy>=1.24
+scipy
+statsmodels
+matplotlib
+seaborn
+kalshi-python
+# py-clob-client requires Python >=3.9.10 — upgrade Python or install manually:
+# pip install py-clob-client (after upgrading to Python 3.9.10+)
+# py-clob-client
+requests
+pyarrow
+pyyaml
+jupyter
+nbformat
+binance-historical-data
+tqdm
+python-dotenv

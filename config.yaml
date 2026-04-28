@@ -1,0 +1,81 @@
+signal:
+  # D1 — Rolling Z-Score
+  d1_lookback_window: 30       # minutes
+  d1_z_threshold: 2.0
+  d1_min_abs_change: 0.02      # 2 percentage points minimum move
+
+  # D2 — Absolute Threshold
+  d2_abs_threshold: 0.05       # 5 percentage points
+
+  # D3 — Relative Change
+  d3_rel_threshold: 0.20       # 20% relative move
+
+  # D4 — Z-Score + Volume Confirmation
+  d4_z_threshold: 2.0
+  d4_lookback_window: 30
+  d4_volume_ratio_min: 1.5     # volume >= 1.5x rolling mean
+
+  cooldown_minutes: 60         # bars to suppress after a signal fires
+
+liquidity_filter:
+  min_active_days: 30
+  # volume_fp is in contracts (not dollars). 1000 contracts/day = meaningful activity.
+  # At average price $0.50, 1000 contracts ≈ $500 actual dollar volume.
+  min_daily_volume_usd: 500
+  # Prediction markets have naturally wide spreads (10-100%+ for out-of-the-money markets).
+  # Percentage spread is not a valid liquidity metric here — only OI and volume matter.
+  # Set to 1.0 (100%) to effectively disable this filter.
+  max_bid_ask_spread_pct: 1.0
+  min_open_interest_usd: 25000
+
+backtest:
+  holding_periods: [10, 30, 60, 240]   # minutes
+  position_size_pct: 0.01              # 1% of NAV per trade
+  stop_loss_vol_mult: 1.5
+  commission_rt: 0.00075               # 0.075% round-trip
+  slippage: 0.00025
+
+crypto_assets:
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+
+# Market tiers for classification
+market_tiers:
+  tier1_keywords:
+    - BTC
+    - ETH
+    - bitcoin
+    - ethereum
+    - solana
+    - SOL
+    - USDC
+    - ETF
+    - reserve
+  tier2_keywords:
+    - regulation
+    - SEC
+    - stablecoin
+    - GENIUS
+    - CLARITY
+    - MicroStrategy
+    - Coinbase
+    - china
+    - enforcement
+  tier3_keywords:
+    - FOMC
+    - federal
+    - CPI
+    - inflation
+    - unemployment
+    - GDP
+    - interest rate
+  tier4_exclude_keywords:
+    - sports
+    - football
+    - basketball
+    - baseball
+    - soccer
+    - Oscar
+    - Grammy
+    - weather
