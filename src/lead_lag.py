@@ -180,7 +180,7 @@ def placebo_time_shuffle(
         shuffled = pd.Series(0.0, index=all_idx)
         shuffled.loc[shuffled_idx] = event_vals[rng.permutation(len(event_vals))]
 
-        ccf = compute_ccf(shuffled.diff().fillna(0), log_ret, lags=lags)
+        ccf = compute_ccf(shuffled, log_ret, lags=lags)
         sim_results.append(ccf.set_index("lag_min")["correlation"])
 
     sim_df = pd.concat(sim_results, axis=1)
@@ -219,7 +219,7 @@ def placebo_random_jumps(
         synth = pd.Series(0.0, index=all_idx)
         synth.iloc[rand_idx] = rng.choice([-1.0, 1.0], size=n_events)
 
-        ccf = compute_ccf(synth.diff().fillna(0), log_ret, lags=lags)
+        ccf = compute_ccf(synth, log_ret, lags=lags)
         for _, row in ccf.iterrows():
             sim_corrs[row["lag_min"]].append(row["correlation"])
 
@@ -250,11 +250,11 @@ def placebo_cross_asset(
     log_ret_target: log returns of the 'correct' asset (e.g. BTC for BTC reserve market)
     log_ret_other : log returns of a 'wrong' asset (e.g. ETH for BTC reserve market)
     """
-    delta_p = signal.diff().fillna(0)
-    ccf_target = compute_ccf(delta_p, log_ret_target, lags=lags).rename(
+    event_signal = signal.reindex(log_ret_target.index).fillna(0)
+    ccf_target = compute_ccf(event_signal, log_ret_target, lags=lags).rename(
         columns={"correlation": "corr_target"}
     )
-    ccf_other = compute_ccf(delta_p, log_ret_other, lags=lags).rename(
+    ccf_other = compute_ccf(event_signal, log_ret_other, lags=lags).rename(
         columns={"correlation": "corr_other"}
     )
     result = ccf_target.merge(ccf_other[["lag_min", "corr_other"]], on="lag_min")

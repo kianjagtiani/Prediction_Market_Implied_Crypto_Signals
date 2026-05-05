@@ -63,7 +63,7 @@ pred_markets_as_a_signal/
 │   ├── 03_signal.ipynb           # Compute D1–D4 signals, save parquets
 │   ├── 04_lead_lag.ipynb         # CCF + Granger causality + placebo tests
 │   ├── 05_event_study.ipynb      # CAR analysis around jump events
-│   ├── 06_options.ipynb          # Options-based strategy variants (WIP, malformed)
+│   ├── 06_options.ipynb          # Options-based strategy variants (WIP)
 │   ├── 07_backtest.ipynb         # Full backtesting: train/val/test + walk-forward
 │   └── 08_comparison.ipynb       # Definition comparison, winner selection
 └── data/
@@ -168,7 +168,7 @@ Data quality: excellent. Zero-volume bars: 72 (BTCUSDT), 72 (ETHUSDT), 267 (SOLU
 
 ### Deribit DVOL
 
-Daily BTC and ETH implied volatility index. **Warning:** only 384 bars fetched (2026-03-23 to 2026-04-08) — the fetcher is only pulling the most recent data. Historical DVOL back to 2021 is available via `GET /public/get_volatility_index_data` with a `start_timestamp` parameter. This needs to be fixed before DVOL can be used as a conditioning variable.
+Daily BTC and ETH implied volatility index. **Warning:** the existing fetched files only contain 384 bars (2026-03-23 to 2026-04-08). The fetcher now supports Deribit's historical volatility-index endpoint with a `start_ts` parameter, but data collection must be rerun before DVOL can be used as a conditioning variable.
 
 ### LunarCrush Sentiment
 
@@ -223,11 +223,11 @@ Key findings:
 
 Computes all four jump definitions for every market. Example signal counts for the most liquid market (KXBTCMAXY-25-DEC31-149999.99): D1=143, D2=27, D3=26, D4=123.
 
-**Warning — see Known Issues #1**: The saved parquet files each report ~19.8M total events, which is the total number of rows across all markets (the full time series), not the number of non-zero signal events. The actual signal events are much fewer. Do not rely on the "total events" count from the parquet file shape.
+The signal parquet files are wide time series: rows are timestamps, columns are markets, values are -1/0/+1 signals. Count actual events with `df.fillna(0).ne(0).sum()`, not by DataFrame shape.
 
 ### 04 — Lead-Lag Analysis (`04_lead_lag.ipynb`)
 
-**Status: Framework complete. Analysis NOT yet executed (cells have no output).**
+**Status: Framework complete. Earlier saved outputs show lead-lag results, but rerun after the May 2026 methodology fix before relying on them.**
 
 Tests each (market, definition) pair:
 1. **Cross-correlation function (CCF)** at lags [-60, -30, -10, -5, -1, 0, 1, 5, 10, 30, 60] minutes
@@ -249,9 +249,9 @@ Pools all markets, computes cumulative abnormal return (CAR) from T=-60 to T=+12
 
 ### 06 — Options Strategy (`06_options.ipynb`)
 
-**Status: Notebook exists but is malformed (JSON parse error). Contents unknown.**
+**Status: Notebook repaired and parseable. Analysis NOT yet executed.**
 
-Intent: explore whether options/perpetuals around the signal offer better risk-adjusted returns than spot. Needs to be re-created or the notebook fixed.
+Intent: explore whether options/perpetuals around the signal offer better risk-adjusted returns than spot. Requires historical DVOL data and an executed spot-strategy result before it is decision-useful.
 
 ### 07 — Backtesting (`07_backtest.ipynb`)
 
@@ -263,7 +263,7 @@ Strategy S1 (spot momentum): go long/short BTC at T+1 after signal fires, hold H
 - Selects best holding period on validation set, evaluates on test set once
 - Walk-forward validation with 5 windows (6-month train, 2-month test, 7-day gap)
 
-**Bug in walk-forward cell**: The lambda in `max(HOLDING_PERIODS, key=lambda h: ...)` has a `...` placeholder — the key function body is missing. Fix before running.
+The previous validation-print placeholder has been fixed. This notebook still needs to be run after notebooks 04 and 05 pass their decision gates.
 
 ### 08 — Definition Comparison (`08_comparison.ipynb`)
 
@@ -284,7 +284,7 @@ Loads `backtest_results.parquet` from notebook 07 and produces:
 Data fetchers for all sources. Key functions:
 - `fetch_kalshi_candlesticks(ticker, start_ts, end_ts, period_interval, is_historical, api_key)` — Handles both live and historical market endpoints
 - `load_binance_bulk(symbol, data_dir)` — Loads and concatenates monthly Binance CSVs into one DataFrame
-- `fetch_deribit_dvol(currency)` — Needs fixing to accept a `start_timestamp` parameter for historical data
+- `fetch_deribit_dvol(currency, start_ts, end_ts, resolution)` — Fetches current DVOL by default and historical volatility-index data when `start_ts` is provided
 - `fetch_lunarcrush_sentiment(coin, api_key)` — Returns empty (needs valid API key)
 
 ### `src/signal.py`
@@ -342,33 +342,29 @@ Signal counts per market range: D1: 5–143, D2: 1–50, D3: 1–71, D4: 0–123
 
 ## 8. Known Issues and Bugs
 
-### Critical (block running downstream notebooks)
+### Fixed Code Issues
 
-**Bug 1 — Walk-forward lambda placeholder (notebook 07, cell 5)**
+**Fixed — Walk-forward validation print placeholder (notebook 07)**
 
-The line `max(HOLDING_PERIODS, key=lambda h: ...)` has `...` as a placeholder. This will crash. Fix:
-```python
-max(HOLDING_PERIODS, key=lambda h: val_reports.loc[val_reports['holding_period'] == h, 'sharpe'].values[0] if len(val_reports.loc[val_reports['holding_period'] == h]) > 0 else -np.inf)
-```
+The notebook now computes the best validation holding period from the collected validation reports instead of using a placeholder.
 
-**Bug 2 — Signal parquet event counts are inflated (~19.8M per definition)**
+**Fixed — Signal parquet event count print was inflated**
 
-In notebook 03, cell 7, the "total events" count is the number of rows in the full DataFrame (all timestamps × all markets), not the count of non-zero signals. The actual number of signal events per market is 1–143 for D1. When you load these parquets downstream, use `(df != 0).sum()` to get actual event counts. This is not a data corruption bug — the parquets are structurally fine (wide format: rows=timestamps, columns=markets, values=signal). But the print statement is misleading.
+Notebook 03 now counts events with `combined.fillna(0).ne(0).sum().sum()`. Existing saved notebook output may still show the old inflated count until the notebook is rerun.
 
-**Bug 3 — Notebook 06 (`06_options.ipynb`) is malformed**
+**Fixed — Notebook 06 (`06_options.ipynb`) was malformed**
 
-The notebook has a JSON parse error and cannot be read by the Jupyter engine. It needs to be re-opened in a text editor, the malformed cell identified, and fixed or deleted.
+The duplicated malformed metadata block was removed, and the notebook is valid JSON again.
+
+**Fixed — Lead-lag placebo plotting and event-signal differencing**
+
+The CCF/placebo workflow now uses signed event signals directly rather than `signal.diff()`, which created artificial opposite-sign events after each jump. `plot_ccf()` now accepts both random-jump percentile nulls and time-shuffle mean/std nulls.
 
 ### Data Issues
 
 **Issue 4 — Deribit DVOL historical data missing**
 
-`fetch_deribit_dvol()` only returns the most recent ~384 bars. The function needs a `start_timestamp` parameter added. Fix in `src/fetch.py`:
-```python
-def fetch_deribit_dvol(currency: str, start_ts: int = None) -> pd.DataFrame:
-    # Add: params['start_timestamp'] = start_ts * 1000 (Deribit uses milliseconds)
-```
-Historical DVOL back to 2021 is available from `https://www.deribit.com/api/v2/public/get_volatility_index_data`.
+`fetch_deribit_dvol()` now accepts `start_ts`, `end_ts`, and `resolution` and uses Deribit's volatility-index endpoint when a historical start timestamp is supplied. The data collection notebook still needs to be rerun for 2022–2026 DVOL history before DVOL can be used as a conditioning variable.
 
 **Issue 5 — LunarCrush sentiment not collected**
 
@@ -408,7 +404,7 @@ When pooling signals across markets, the code assumes signals from different mar
 
 ### What is NOT yet run
 
-**Notebooks 04, 05, 07, 08 have no outputs.** The entire analytical pipeline from lead-lag analysis through backtesting has not been executed. The strategy has not been validated.
+**Notebooks 05, 07, 08 have not been executed. Notebook 04 has older saved outputs, but it should be rerun after the event-signal methodology fix.** The strategy has not been validated through event study, backtest, or final comparison.
 
 ### Preliminary signal from EDA (daily resolution only)
 
@@ -428,11 +424,10 @@ Strong daily co-movement between Kalshi BTC price markets and BTC spot returns:
 
 ## 10. Next Steps — Priority Order
 
-### Step 1 (Immediate): Fix bugs and run the pipeline
+### Step 1 (Immediate): Rerun the pipeline
 
-1. Fix the walk-forward lambda bug in notebook 07, cell 5.
-2. Fix notebook 06 (options notebook) — open in a text editor, find the malformed cell.
-3. Run notebooks 04 → 05 → 07 → 08 in sequence. Read the decision gates carefully:
+1. Rerun notebook 03 if you change data sparsity treatment or the market universe.
+2. Run notebooks 04 → 05 → 07 → 08 in sequence. Read the decision gates carefully:
    - If notebook 04 Granger test shows no significance → **stop the entire project**, hypothesis rejected.
    - If notebook 05 CAR < 0.3% net → **stop**, no tradeable edge.
    - If notebooks 07/08 produce Sharpe < 1.0 on test set → go back to signal design.
@@ -446,7 +441,7 @@ Before running notebook 04, decide on and implement one of these approaches:
 
 ### Step 3: Improve Deribit DVOL data
 
-Fix `fetch_deribit_dvol()` in `src/fetch.py` to accept a `start_timestamp` parameter and re-run data collection for 2022–2026 DVOL history. Use DVOL as a conditioning variable: hypothesize that signals are stronger during high-volatility regimes.
+Re-run data collection with `fetch_deribit_dvol(currency, start_ts=...)` for 2022–2026 DVOL history. Use DVOL as a conditioning variable: hypothesize that signals are stronger during high-volatility regimes.
 
 ### Step 4: Focus the market universe
 
