@@ -1,11 +1,15 @@
 # Prediction Markets as a Crypto Signal
 
+Spring '26 Cryptocurrency Desk Project \
+**Desk Head:** Kian Jagtiani \
+**Members on Project:** Kian Jagtiani, James Gui
+
+---
+
 Do sharp moves in Kalshi prediction-market odds tell you anything about where BTC is
 headed over the next few hours? We pulled minute-level candlesticks for 53 Kalshi markets
 (BTC price targets, CPI, Fed decisions), flagged sudden probability jumps, and tested
 whether those jumps lead BTC/ETH/SOL spot returns.
-
-Spring '26 crypto desk project. Kian Jagtiani (kjagtian@usc.edu).
 
 ## What we found, notebook by notebook
 
@@ -58,39 +62,36 @@ enough to trade given the event-study result. (Ignore the Sharpe 8–13 printout
 notebook 07's stored output — an artifact of the sparse pooled run; these are the final
 numbers. Gate-by-gate detail: `reports/focused_research_report.md`.)
 
-## Bottom line
+## Conclusion and next steps
 
 Kalshi jumps carry genuine information about BTC's next few minutes — the statistics are
-unambiguous. But Kalshi's public candlesticks are 1-minute, so by the time a jump is
-visible the move has happened, and a T+1 entry captures nothing after costs. To make
-this tradeable you'd need sub-minute data: scrape Kalshi's websocket at ~10s resolution
-for a month or two and re-run notebooks 04–07 at that resolution. Extending to ETH/SOL
-and checking whether the lag shifts across market regimes are the other open threads.
+unambiguous — but the public 1-minute candles are too coarse to trade on. By the time a
+jump is visible the move has already happened, and an entry at the next bar captures
+nothing after costs.
+
+What it would take to make this a profitable strategy:
+
+- Scrape sub-minute Kalshi data (the websocket updates at ~10s resolution) for a month
+  or two and re-run the lead-lag → event study → backtest chain on it. The edge lives
+  inside the first minute, so this is where the P&L would be.
+- Extend the pipeline to ETH and SOL, whose Kalshi markets sat outside the primary universe.
+- Segment by market regime to check whether the lag — and the slow drift the H=240
+  backtest picks up — is stable enough to size positions on.
+- Paper trade only once the sub-minute re-run clears the event-study and OOS Sharpe gates.
 
 The full findings are in `reports/final_presentation_strategy3.pdf`.
 
-## What's here
+## Repository contents
 
-- `notebooks/00`–`08` — the pipeline, in the order above; each writes to
-  `data/processed/` for the next
-- `src/` — Kalshi/Binance/Deribit fetchers, jump definitions, CCF + Granger + placebo
-  tests, event study, vectorized backtest with walk-forward, metrics, plots
+- `notebooks/00`–`08` — the analysis, in the order above
+- `src/` — data fetchers, jump definitions, CCF/Granger/placebo tests, event study,
+  vectorized backtest with walk-forward, metrics, plots
 - `scripts/run_focused_pipeline.py` — end-to-end rerun on the 5-market primary universe
 - `reports/` — final presentation (our strategy's section) and the focused-rerun writeup
-- `data/processed/` + `data/figures/` — signal parquets and all plots (tracked in git;
-  `data/raw/` is ~1.2 GB and is not)
-- `build_slides.py` — builds `data/strategy2_slides.pptx` from the saved figures
+- `data/processed/` + `data/figures/` — signal parquets and every figure in the analysis
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-Put a Kalshi key in `.env` (`KALSHI_API_KEY=...`, from kalshi.com → Account → API).
-Binance 1-min data comes from data.binance.vision and needs no key; Deribit DVOL is
-public. Raw data isn't in the repo — notebooks 00–01 rebuild it (the Kalshi candlesticks
-are the slow part). Strategy parameters live in `config.yaml`.
+The ~1.2 GB of raw Kalshi/Binance/Deribit data is not tracked; notebooks 00–01 document
+exactly how it was collected, and all parameters live in `config.yaml`.
 
 ## References
 
