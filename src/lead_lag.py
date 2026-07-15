@@ -53,7 +53,6 @@ def run_granger(
     delta_p: pd.Series,
     log_ret: pd.Series,
     maxlag: int = 30,
-    verbose: bool = False,
 ) -> pd.DataFrame:
     """
     Granger causality test: does delta_p help predict log_ret beyond log_ret's own lags?
@@ -68,7 +67,10 @@ def run_granger(
     # grangercausalitytests expects [dependent, cause] ordering
     data = aligned[["ret", "dp"]].values
 
-    gc_results = grangercausalitytests(data, maxlag=maxlag, verbose=verbose)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        gc_results = grangercausalitytests(data, maxlag=maxlag)
 
     rows = []
     for lag, result in gc_results.items():
@@ -180,7 +182,7 @@ def placebo_time_shuffle(
         shuffled = pd.Series(0.0, index=all_idx)
         shuffled.loc[shuffled_idx] = event_vals[rng.permutation(len(event_vals))]
 
-        ccf = compute_ccf(shuffled.diff().fillna(0), log_ret, lags=lags)
+        ccf = compute_ccf(shuffled, log_ret, lags=lags)
         sim_results.append(ccf.set_index("lag_min")["correlation"])
 
     sim_df = pd.concat(sim_results, axis=1)
@@ -188,6 +190,8 @@ def placebo_time_shuffle(
         "lag_min": lags,
         "placebo_mean_corr": sim_df.mean(axis=1).values,
         "placebo_std_corr": sim_df.std(axis=1).values,
+        "null_p5": np.percentile(sim_df.values, 5, axis=1),
+        "null_p95": np.percentile(sim_df.values, 95, axis=1),
     })
     return summary
 
@@ -219,7 +223,7 @@ def placebo_random_jumps(
         synth = pd.Series(0.0, index=all_idx)
         synth.iloc[rand_idx] = rng.choice([-1.0, 1.0], size=n_events)
 
-        ccf = compute_ccf(synth.diff().fillna(0), log_ret, lags=lags)
+        ccf = compute_ccf(synth, log_ret, lags=lags)
         for _, row in ccf.iterrows():
             sim_corrs[row["lag_min"]].append(row["correlation"])
 
@@ -250,11 +254,11 @@ def placebo_cross_asset(
     log_ret_target: log returns of the 'correct' asset (e.g. BTC for BTC reserve market)
     log_ret_other : log returns of a 'wrong' asset (e.g. ETH for BTC reserve market)
     """
-    delta_p = signal.diff().fillna(0)
-    ccf_target = compute_ccf(delta_p, log_ret_target, lags=lags).rename(
+    event_signal = signal.reindex(log_ret_target.index).fillna(0)
+    ccf_target = compute_ccf(event_signal, log_ret_target, lags=lags).rename(
         columns={"correlation": "corr_target"}
     )
-    ccf_other = compute_ccf(delta_p, log_ret_other, lags=lags).rename(
+    ccf_other = compute_ccf(event_signal, log_ret_other, lags=lags).rename(
         columns={"correlation": "corr_other"}
     )
     result = ccf_target.merge(ccf_other[["lag_min", "corr_other"]], on="lag_min")

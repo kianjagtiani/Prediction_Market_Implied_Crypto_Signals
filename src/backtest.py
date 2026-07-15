@@ -4,7 +4,7 @@ backtest.py — Vectorized backtest engine for prediction market jump signals.
 Strategy S1: Spot momentum — go long/short on crypto at T+1 after a jump fires,
 hold for H bars, exit on stop-loss.
 
-All operations are vectorized (no row loops). Look-ahead bias is prevented via shift(1).
+Everything is vectorized; positions are shifted one bar so there's no look-ahead.
 """
 
 import numpy as np
@@ -39,43 +39,38 @@ def run_backtest(
     sig = signals.reindex(idx).fillna(0)
     ret = crypto_ret.reindex(idx).fillna(0)
 
-    # shift(1): trade on bar T+1 open after signal fires at T
-    # This is the critical look-ahead bias prevention
-    positions = sig.shift(1).fillna(0)
+    # Enter one bar after the signal, then ffill the direction while the trade
+    # is open. A new entry overwrites the old one so overlapping signals don't
+    # stack returns on the same price move.
+    entries = sig.shift(1).fillna(0).replace(0, np.nan)
+    position = entries.ffill(limit=holding_period - 1).fillna(0)
 
-    # Forward return over holding period (sum of next H log returns)
-    # shift(-holding_period) means: at time T, we know the return over [T, T+H]
-    # but we only USE this after shifting positions by 1, so no look-ahead
-    fwd_ret = ret.rolling(holding_period).sum().shift(-holding_period + 1)
+    # Per-bar gross return
+    gross_ret = position * ret
 
-    # Stop-loss: compute pre-event realized vol (rolling std of past `window` bars)
-    pre_vol = ret.rolling(pre_event_vol_window).std()
-    stop_threshold = stop_loss_vol_mult * pre_vol
+    # Stop-loss: clip per-bar loss at stop_loss_vol_mult × pre-event vol
+    pre_vol = ret.rolling(pre_event_vol_window).std().fillna(0)
+    gross_ret = gross_ret.clip(lower=-(stop_loss_vol_mult * pre_vol))
 
-    # Apply stop-loss: zero out the position if expected loss > stop threshold
-    # (simplified: cap the forward return at -stop_threshold)
-    gross_ret = positions * fwd_ret
-    gross_ret = gross_ret.clip(lower=-stop_threshold)
-
-    # Cost: pay commission + slippage whenever position changes (entry or exit)
-    position_change = positions.diff().abs().fillna(0)
+    # Cost: commission + slippage charged whenever the position changes
+    position_change = position.diff().abs().fillna(0)
     cost = position_change * (commission_rt + slippage)
 
     net_ret = gross_ret - cost
-
-    # Cumulative net return
     cum_net = (1 + net_ret.fillna(0)).cumprod()
 
-    result = pd.DataFrame({
+    # entry bars, for trade counting downstream
+    is_entry = (position != 0) & (position.shift(1).fillna(0) == 0)
+
+    return pd.DataFrame({
         "signal": sig,
-        "position": positions,
+        "position": position,
         "gross_ret": gross_ret,
         "cost": cost,
         "net_ret": net_ret,
         "cumulative_net": cum_net,
+        "entry": is_entry.astype(int),
     }, index=idx)
-
-    return result
 
 
 def run_all_holding_periods(
@@ -145,7 +140,11 @@ def walk_forward(
     gap_td = pd.DateOffset(days=gap_days)
 
     for w in range(n_windows):
-        train_start = start + w * (train_td + test_td + gap_td)
+        # int * DateOffset isn't a thing, so build each window's offset directly
+        train_start = start + pd.DateOffset(
+            months=(train_months + test_months) * w,
+            days=gap_days * w,
+        )
         train_end = train_start + train_td
         test_start = train_end + gap_td
         test_end = test_start + test_td

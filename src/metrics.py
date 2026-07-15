@@ -22,8 +22,8 @@ def annualized_vol(returns: pd.Series, periods_per_year: int = 525_600) -> float
 
 
 def sharpe(returns: pd.Series, rf: float = 0.0, periods_per_year: int = 525_600) -> float:
-    """Annualized Sharpe ratio."""
-    ann_ret = annualized_return(returns, periods_per_year)
+    """Annualized Sharpe ratio (arithmetic mean, not CAGR — robust to sparse return series)."""
+    ann_ret = returns.mean() * periods_per_year
     ann_vol = annualized_vol(returns, periods_per_year)
     if ann_vol == 0:
         return np.nan
@@ -32,7 +32,7 @@ def sharpe(returns: pd.Series, rf: float = 0.0, periods_per_year: int = 525_600)
 
 def sortino(returns: pd.Series, rf: float = 0.0, periods_per_year: int = 525_600) -> float:
     """Annualized Sortino ratio (uses downside deviation)."""
-    ann_ret = annualized_return(returns, periods_per_year)
+    ann_ret = returns.mean() * periods_per_year
     downside = returns[returns < 0].std() * np.sqrt(periods_per_year)
     if downside == 0:
         return np.nan
@@ -144,47 +144,41 @@ def full_report(
     n_trials: int = 1,
     periods_per_year: int = 525_600,
     label: str = "",
+    n_trades_override: int = None,
 ) -> pd.Series:
     """
     Compute all required metrics and return as a named Series.
     Prints a formatted summary.
     """
     r = net_returns.dropna()
-    ann_ret = annualized_return(r, periods_per_year)
-    ann_vol_val = annualized_vol(r, periods_per_year)
-    sh = sharpe(r, periods_per_year=periods_per_year)
-    so = sortino(r, periods_per_year=periods_per_year)
-    mdd = max_drawdown(r)
-    cal = calmar(r, periods_per_year)
+
+    # Sharpe/vol/ann_ret are computed on daily-resampled returns. Per-bar
+    # Sharpe is inflated: a 240-min hold makes consecutive bars autocorrelated,
+    # so they can't be annualized as if independent.
+    daily_r = r.resample('1D').sum()
+    ppy = 365  # crypto trades every day
+
+    ann_ret = daily_r.mean() * ppy
+    ann_vol_val = daily_r.std() * np.sqrt(ppy)
+    sh = ann_ret / ann_vol_val if ann_vol_val > 0 else np.nan
+    mdd = max_drawdown(r)  # keep per-bar for drawdown precision
     wr = win_rate(r)
-    pf = profit_factor(r)
-    n_trades = int((r != 0).sum())
+    n_trades = n_trades_override if n_trades_override is not None else int((r != 0).sum())
 
     metrics = {
         "label": label,
-        "cagr": round(ann_ret * 100, 2),
+        "ann_ret_pct": round(ann_ret * 100, 2),
         "ann_vol_pct": round(ann_vol_val * 100, 2),
         "sharpe": round(sh, 3) if not np.isnan(sh) else np.nan,
-        "sortino": round(so, 3) if not np.isnan(so) else np.nan,
         "max_drawdown_pct": round(mdd * 100, 2),
-        "calmar": round(cal, 3) if not np.isnan(cal) else np.nan,
         "win_rate_pct": round(wr * 100, 1) if not np.isnan(wr) else np.nan,
-        "profit_factor": round(pf, 2) if not np.isinf(pf) else np.inf,
         "n_trades": n_trades,
     }
 
-    if gross_returns is not None:
-        cost_drag = annualized_return(gross_returns.dropna(), periods_per_year) - ann_ret
-        metrics["cost_drag_pct"] = round(cost_drag * 100, 2)
-
-    if benchmark_returns is not None:
-        ir = information_ratio(r, benchmark_returns.reindex(r.index).fillna(0), periods_per_year)
-        metrics["information_ratio"] = round(ir, 3) if not np.isnan(ir) else np.nan
-
     if n_trials > 1:
-        sk = float(r.skew())
-        ku = float(r.kurtosis()) + 3  # scipy returns excess kurtosis
-        dsr = deflated_sharpe_ratio(sh, n_trials, len(r), sk, ku)
+        sk = float(daily_r.dropna().skew())
+        ku = float(daily_r.dropna().kurtosis()) + 3
+        dsr = deflated_sharpe_ratio(sh, n_trials, len(daily_r.dropna()), sk, ku)
         metrics["deflated_sharpe_ratio"] = round(dsr, 3)
 
     result = pd.Series(metrics)

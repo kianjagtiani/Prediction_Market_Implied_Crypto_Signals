@@ -499,21 +499,52 @@ def load_crypto(symbol: str) -> pd.DataFrame:
 DERIBIT_BASE = "https://www.deribit.com/api/v2/public"
 
 
-def fetch_deribit_dvol(currency: str = "BTC") -> pd.DataFrame:
+def fetch_deribit_dvol(
+    currency: str = "BTC",
+    start_ts: int = None,
+    end_ts: int = None,
+    resolution: str = "1D",
+) -> pd.DataFrame:
     """
     Fetch historical daily volatility index (DVOL) from Deribit.
     Free, no auth required.
 
+    If start_ts is provided, uses get_volatility_index_data, which supports
+    explicit historical ranges. Timestamps are Unix seconds; Deribit expects ms.
+    Without start_ts, falls back to get_historical_volatility for compatibility.
+
     Returns DataFrame with timestamp_utc, volatility (annualized IV %).
     """
-    resp = requests.get(
-        f"{DERIBIT_BASE}/get_historical_volatility",
-        params={"currency": currency},
-    )
-    resp.raise_for_status()
-    data = resp.json()["result"]
+    if start_ts is None:
+        resp = requests.get(
+            f"{DERIBIT_BASE}/get_historical_volatility",
+            params={"currency": currency},
+        )
+        resp.raise_for_status()
+        data = resp.json()["result"]
+        df = pd.DataFrame(data, columns=["timestamp_ms", "volatility"])
+    else:
+        if end_ts is None:
+            end_ts = int(pd.Timestamp.now(tz="UTC").timestamp())
+        resp = requests.get(
+            f"{DERIBIT_BASE}/get_volatility_index_data",
+            params={
+                "currency": currency,
+                "start_timestamp": start_ts * 1000,
+                "end_timestamp": end_ts * 1000,
+                "resolution": resolution,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()["result"].get("data", [])
+        if not data:
+            return pd.DataFrame(columns=["currency", "timestamp_utc", "volatility"])
+        df = pd.DataFrame(data)
+        if {"timestamp", "close"}.issubset(df.columns):
+            df = df.rename(columns={"timestamp": "timestamp_ms", "close": "volatility"})
+        else:
+            df = pd.DataFrame(data, columns=["timestamp_ms", "open", "high", "low", "volatility"])
 
-    df = pd.DataFrame(data, columns=["timestamp_ms", "volatility"])
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_ms"].astype(int), unit="ms", utc=True)
     df["currency"] = currency
     df = df[["currency", "timestamp_utc", "volatility"]].sort_values("timestamp_utc")

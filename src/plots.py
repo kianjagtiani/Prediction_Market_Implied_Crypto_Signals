@@ -91,7 +91,7 @@ def plot_ccf(
     Plot the CCF with 95% confidence bands and optional placebo null distribution.
 
     ccf_df    : output of lead_lag.compute_ccf()
-    placebo_df: output of lead_lag.placebo_random_jumps()
+    placebo_df: output of lead_lag.placebo_random_jumps() or placebo_time_shuffle()
     """
     fig, ax = plt.subplots(figsize=(12, 5))
 
@@ -103,12 +103,26 @@ def plot_ccf(
     ax.axhline(0, color="black", lw=0.8)
     ax.axvline(0, color="gray", lw=0.8, linestyle=":")
 
-    if placebo_df is not None:
+    if placebo_df is not None and {"null_p5", "null_p95"}.issubset(placebo_df.columns):
         ax.fill_between(
             placebo_df["lag_min"],
             placebo_df["null_p5"],
             placebo_df["null_p95"],
-            color="orange", alpha=0.25, label="Null (shuffle) 5-95th pct",
+            color="orange", alpha=0.25, label="Null 5-95th pct",
+        )
+    elif placebo_df is not None and {"placebo_mean_corr", "placebo_std_corr"}.issubset(placebo_df.columns):
+        lo = placebo_df["placebo_mean_corr"] - 1.96 * placebo_df["placebo_std_corr"]
+        hi = placebo_df["placebo_mean_corr"] + 1.96 * placebo_df["placebo_std_corr"]
+        ax.fill_between(
+            placebo_df["lag_min"],
+            lo,
+            hi,
+            color="orange", alpha=0.25, label="Time-shuffle null ±1.96σ",
+        )
+        ax.plot(
+            placebo_df["lag_min"],
+            placebo_df["placebo_mean_corr"],
+            color="orange", lw=1, linestyle="--", label="Time-shuffle mean",
         )
 
     ax.set_xlabel("Lag (minutes; positive = prediction market leads)")
